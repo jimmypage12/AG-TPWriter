@@ -1,0 +1,756 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Nov  2 19:44:21 2017
+
+@author: Andrew
+"""
+
+import pandas as pd
+import docx
+from docx.shared import Cm, Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+import xlrd
+import datetime
+import os
+import numpy as np
+
+
+start_time = datetime.datetime.now()
+
+appendix_set_name_descriptor = "Americas Distributors"
+
+def build_excel_file_directory():
+### Enter folder name where the 3 Excel files are saved
+    data_file_folder_name = 'contract design'
+    
+    data_file_location_dir = (r"C:\Users\Andrew\Desktop")
+    full_folder_location = os.path.join(data_file_location_dir, data_file_folder_name)
+    list_of_excel_files_short = [x for x in os.listdir(full_folder_location) if x.endswith('.xls') == True or x.endswith('.xlsx') == True]
+    for excel_file_short in list_of_excel_files_short:
+        if excel_file_short.endswith('.xls') == False and excel_file_short.endswith('.xlsx') == False:
+            list_of_excel_files_short.remove(excel_file_short)
+        else:
+            pass
+            
+#    assert (len(list_of_excel_files_short) == 3, "Incorrect count of Excel files in folder")
+    
+    list_of_excel_files_long = []
+#    print(len(list_of_excel_files_short))
+    for file_name_short in list_of_excel_files_short:
+        list_of_excel_files_long.append(os.path.join(full_folder_location, file_name_short))
+    
+    range_construct_file_name = None
+    comp_rejection_matrix_file = None
+    financials_file_name = None
+    
+    for excel_file in list_of_excel_files_long:
+        wb = xlrd.open_workbook(excel_file)
+        ws = wb.sheet_by_index(0)
+        cell_A1_value = ws.cell_value(0,0) 
+        if cell_A1_value == "Comparable Accept/Reject Matrix":
+            comp_rejection_matrix_file = excel_file
+        elif cell_A1_value == "Company Name":
+            financials_file_name = excel_file
+        elif cell_A1_value == "Range Construction":
+            range_construct_file_name = excel_file
+        else:
+            print('Excel file directory not built correctly')
+            
+    return range_construct_file_name, comp_rejection_matrix_file, financials_file_name
+
+range_construct_file_name, comp_rejection_matrix_file, financials_file_name = build_excel_file_directory()
+
+
+today = datetime.datetime.today()
+today_string = str(today.month) + "_" + str(today.day) + "_" + str(today.year)
+
+wb = xlrd.open_workbook(filename=range_construct_file_name)
+sheet_names = wb._sheet_names
+count_sheets = len(sheet_names)
+
+word_doc = docx.Document()
+
+style = word_doc.styles['Normal']
+font = style.font
+font.name = 'Arial'
+font.size = Pt(9)
+table_number = 1
+
+number_to_words = {1: 'One', 2: 'Two', 3: 'Three', 4: 'Four', 5: 'Five', \
+                   6: 'Six', 7: 'Seven', 8: 'Eight', 9: 'Nine', 10: 'Ten', \
+                   11: 'Eleven', 12: 'Twelve', 13: 'Thirteen', 14: 'Fourteen', \
+                   15: 'Fifteen', 16: 'Sixteen', 17: 'Seventeen', 18: 'Eighteen', \
+                   19: 'Nineteen'}
+
+
+#Run xlrd module to gather data from range construction tab
+def run_xlrd(file_name, sheet_name, *partial_return):
+    wb = xlrd.open_workbook(filename=range_construct_file_name)
+    ws = wb.sheet_by_name(sheet_name)
+    col_1_values = ws.col_values(0)
+    col_2_values = ws.col_values(1)
+    
+    #get tested party name, PLI, average type, and quartile calculation method
+    tested_party_row = [i for i, x in enumerate(col_1_values) if x == 'Tested Party:']
+    tested_party = col_2_values[tested_party_row.pop()]
+    PLI_row = [i for i, x in enumerate(col_1_values) if x == 'Profit Level Indicator (PLI):']
+    PLI = col_2_values[PLI_row.pop()]
+    average_type_row = [i for i, x in enumerate(col_1_values) if x == 'Average Type:']
+    average_type = col_2_values[average_type_row.pop()]
+    quart_calc_method_row = [i for i, x in enumerate(col_1_values) if x == 'Quartile Calculation Method:']
+    quart_calc_method = col_2_values[quart_calc_method_row.pop()]  
+    
+    # get range of comparable taxpayer rows in Excel file
+    comp_taxpayer = [i for i, x in enumerate(col_1_values) if x == 'Comparable Taxpayer']
+    comp_1_row = comp_taxpayer.pop() + 1
+    row_range = [q for q, z in enumerate(col_1_values) if z == 'Range']
+    comp_last_row = row_range.pop() - 2
+    comps_row_range = (comp_1_row, comp_last_row)
+    
+    # get range of Minimum through Maximum rows
+    comps_minimum_row = [i for i, x in enumerate(col_1_values) if x == 'Minimum']
+    comps_maximum_row = [q for q, z in enumerate(col_1_values) if z == 'Maximum']
+    comps_stats_range = (comps_minimum_row.pop(), comps_maximum_row.pop())
+    
+    if not partial_return:
+        return col_1_values, comps_row_range, comps_stats_range, tested_party, PLI, average_type, quart_calc_method    
+    else:
+        return comps_row_range, comps_stats_range, tested_party
+ 
+# Initiate partial run of run_xlrd to gather comps_row_range, comps_stats_range for company list table
+comps_row_range, comps_stats_range, tested_party = run_xlrd(range_construct_file_name, wb._sheet_names[0], True)
+
+
+
+#Build a Pandas dataframe of Excel tab
+def run_pandas_dataframes(file_name, sheet_name):
+    xlsx = pd.ExcelFile(file_name)
+    rows_to_skip = []
+    rows_to_skip.extend([i for i in range(comps_row_range[1]+1,comps_stats_range[0])])
+    rows_to_skip.extend([i for i in range(comps_stats_range[1]+1, comps_stats_range[1]+6)])
+    
+    df = pd.read_excel(xlsx, sheet_name, index_col=0, header=7, na_values=['NA'], skiprows=rows_to_skip)
+    
+    df_range_stats = df.loc['Minimum':'Maximum']
+    df_comps = df.iloc[:(len(df)-5)]
+    df_comps[:].fillna("-", inplace=True)
+
+    return df_range_stats, df_comps
+
+
+#Build table of data for independent comparable companies
+def build_comps_table_docx(df_comps, df_range_stats):
+    
+    table_row_count = df_comps.shape[0] + df_range_stats.shape[0]+ 2
+    
+    comps_table = word_doc.add_table(rows=table_row_count, cols=df_comps.shape[1] + 1, 
+                                     style = "Medium Shading 1 Accent 3")
+
+    #Write column headings for comps in Word document
+    for column, cell in zip(df_comps.columns.tolist(), range(1,len(df_comps.columns.tolist())+1)):
+        p = comps_table.rows[0].cells[cell].add_paragraph(text=str(column))
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+      
+    #Write row headings for comps in Word document
+    for row, item in zip(range(1, len(df_comps)+1), range(0, len(df_comps))):
+        p = comps_table.columns[0].cells[row].add_paragraph(text=str(df_comps.iloc[item]._name))
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    
+    #Write data for comps into Word document
+    for row in range(1, len(df_comps)+1):
+        for column in range(1, len(df_comps.columns)+1):
+            p = comps_table.rows[row].cells[column].add_paragraph(text=str(df_comps.iloc[(row-1)][column-1]))
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            
+    start_row_range_stats = df_comps.shape[0] + 2
+    
+    #Write row headings for range data in Word document
+    for row, item in zip(range(start_row_range_stats, table_row_count), range(0, len(df_range_stats))):
+        p = comps_table.columns[0].cells[row].add_paragraph(text = df_range_stats.iloc[item]._name)
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+    #Write data for range data into Word document
+    for row in range(start_row_range_stats, table_row_count):
+        for column in range(1, len(df_range_stats.columns)+1):
+            p = comps_table.rows[row].cells[column].add_paragraph()
+            p.add_run(str(df_range_stats.iloc[(row-start_row_range_stats)][column-1])).italics = True
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT          
+            
+
+    for cell in comps_table.columns[0].cells:
+        cell.width = Inches(1.75)
+
+
+#Build table of data summarizing the quartile ranges from the aggregated independent comparable companies
+#def build_data_range_table_docx(df_range_stats): 
+#    data_range_table = word_doc.add_table(rows=df_range_stats.shape[0] + 1, cols=df_range_stats.shape[1] + 1, 
+#                                          style = "Medium Shading 1 Accent 3")
+#    
+#    #Write column headings for range data in Word document
+#    for column, cell in zip(df_range_stats.columns.tolist(), range(1,len(df_range_stats.columns.tolist())+1)):
+#        p = data_range_table.rows[0].cells[cell].add_paragraph(text = str(column))
+#        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+#    
+#    #Write row headings for range data in Word document
+#    for row, item in zip(range(1, len(df_range_stats)+1), range(0, len(df_range_stats))):
+#        p = data_range_table.columns[0].cells[row].add_paragraph(text = df_range_stats.iloc[item]._name)
+#        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+#        
+#    #Write data for range data into Word document
+#    for row in range(1, len(df_range_stats)+1):
+#        for column in range(1, len(df_range_stats.columns)+1):
+#            p = data_range_table.rows[row].cells[column].add_paragraph(text=str(df_range_stats.iloc[(row-1)][column-1]))
+#            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+#            
+#    for cell in data_range_table.columns[0].cells:
+#        cell.width = Inches(1.75)
+
+
+#Add wording for after the quartile range table
+def add_range_narrative(df, table_number, average_type, PLI):
+    years = list(df.columns)
+    for item in years:
+        if type(item) == str:
+            years.remove(item)
+    min_year, max_year = min(years), max(years)
+    year_range = str(min_year) + "-" + str(max_year)
+    lower_quart, median_quart, upper_quart = df['Average']['Lower Quartile'], df['Average']['Median'], df['Average']['Upper Quartile']
+    
+    range_narrative = "\nThe {} interquartile range of {} {} results for the set of accepted comparable companies is from {} to {}, with a median of {}.".format(average_type.lower(), year_range, PLI.lower(), lower_quart, upper_quart, median_quart)
+
+    return range_narrative
+
+
+#Add wording for before the company specific PLI table
+def add_table_description(df, table_number, PLI):
+    years = list(df.columns)
+    for item in years:
+        if type(item) == str:
+            years.remove(item)
+    min_year, max_year = min(years), max(years)
+    year_range = str(min_year) + "-" + str(max_year)
+    
+    table_description = "Table {}:    {} {} Results for Comparable Independent Companies".format(table_number, year_range, PLI)
+    
+    return table_description
+
+    
+#Build simple table list of companies in sample
+def add_company_name_table(table_number):
+    sheet_name = wb._sheet_names[0]
+    df_range_stats_1, df_comps_1 = run_pandas_dataframes(range_construct_file_name, sheet_name)
+    word_doc.add_heading("Table " + str(table_number) + ": \tComparable independent companies\n")
+    table_number +=1
+    company_list = df_comps_1.to_dict('split')['index']
+    company_name_table = word_doc.add_table(rows=len(company_list) + 1, cols = 1, style = "Light List Accent 3")
+    
+    company_name_table.columns[0].cells[0].add_paragraph(text = "Company Name")
+    
+    for row, item in zip(range(1, len(company_list)+1), range(0, len(company_list))):
+        p = company_name_table.columns[0].cells[row].add_paragraph(text = company_list[item])
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+#    count_companies_text = None
+    if len(company_list) > 20:
+        count_companies_text = str(len(company_list))
+    else:
+        count_companies_text = number_to_words[len(company_list)].lower()
+        
+    p = word_doc.add_paragraph("\nThe complete search strategy is detailed in Appendix A and business descriptions "
+                       "for these {} companies are in Appendix B.  Appendix C provides the selected financial "
+                       "data for the accepted companies and Appendix D contains the relevant rejection criteria "
+                       "for the search.".format(count_companies_text))
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
+    word_doc.add_paragraph()
+    
+    return table_number
+    
+
+#table_number = add_company_name_table(table_number)
+
+        
+#Iterate over all Excel file tabs and add tables to .docx file
+    
+def build_PLI_tables(sheet_names, table_number):
+    col_1_values, comps_row_range, comps_stats_range, tested_party, PLI, average_type, quart_calc_method = run_xlrd(range_construct_file_name, sheet_name)
+    df_range_stats, df_comps = run_pandas_dataframes(range_construct_file_name, sheet_name)
+#    word_doc.add_paragraph("Table " + str(table_number) + ": ")
+    word_doc.add_heading(add_table_description(df_comps, table_number, PLI))
+    table_number += 1
+    build_comps_table_docx(df_comps, df_range_stats)
+    word_doc.add_paragraph("\n")
+#    table_number += 1   
+#    build_data_range_table_docx(df_range_stats)
+    p = word_doc.add_paragraph(add_range_narrative(df_range_stats, table_number, average_type, PLI))
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
+    word_doc.add_paragraph("\n")
+    return table_number
+
+def get_comps_tabs_names(financials_file_name):
+    wb = xlrd.open_workbook(filename=financials_file_name)
+    all_sheet_names = wb.sheet_names()
+    sheet_names_enum = {}
+    for count, company in enumerate(all_sheet_names, 1):
+        sheet_names_enum[company] = count
+    count_sheet_names = len(all_sheet_names)    
+
+    return all_sheet_names, count_sheet_names, sheet_names_enum
+
+
+comps_tabs_names, count_comps_tabs, sheet_names_enum = get_comps_tabs_names(financials_file_name)
+
+
+def build_search_strategy_appendix(appendix_letter, tested_party, data_set_source, *set_description):
+    word_doc.add_page_break()
+    if set_description:
+        set_description = str(set_description)
+        word_doc.add_heading("Appendix " + appendix_letter + " - Search Strategy: " + set_description + "\n", level=2)
+    else:    
+        word_doc.add_heading("Appendix " + appendix_letter + " - Search Strategy \n", level=2)
+    
+    
+    p_intro = word_doc.add_paragraph("The following comparable data search and evaluation process has been"
+                           "conducted for the tested party shown below:")
+    p_intro_format = p_intro.paragraph_format
+#    p_intro_format.alignnment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
+    
+    p_tested_party = word_doc.add_paragraph()
+    p_tested_party.add_run(tested_party + "\n").bold = True
+    p_tested_party.style = "List Bullet"
+    p_steps = word_doc.add_paragraph("In the following four steps this tested party will be referred to as the current "
+                           "tested party. For a more detailed description of the tested party selection process "
+                           "see the section entitled \"Selecting the Tested Party\". \n")
+    p_steps.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW 
+    
+    p_step_one = word_doc.add_paragraph("Step One: Commercial Database Search\n")
+    p_step_one_detail = word_doc.add_paragraph()
+    p_step_one_detail.add_run("In order to find companies that are similar to the tested party, it is necessary "
+                           "to search commercial databases that contain company information that has been disclosed "
+                           "in public filings.  The table below details the databases that were searched, the search "
+                           "criteria that were employed and the number of potentially comparable companies that "
+                           "were identified.")
+#    p_step_one_detail.alignnment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW    
+    data_set_source_text = "Data Set Source \t" + data_set_source + "\n"
+    p_data_set_source = word_doc.add_paragraph()
+    p_data_set_source.add_run(data_set_source_text).bold = True
+    p_data_set_source.style = "List Bullet"
+
+
+
+###
+### Build business descriptions appendix
+###
+
+def read_business_description(financials_file_name, sheet):
+    wb_fin = xlrd.open_workbook(financials_file_name)
+    ws_fin = wb_fin.sheet_by_name(sheet)
+    col_1_values = ws_fin.col_values(0)
+    col_2_values = ws_fin.col_values(1)
+    
+    company_row = [i for i, x in enumerate(col_1_values) if x == 'Company Name']
+    company_name = col_2_values[company_row.pop()]
+    
+    description_row = [i for i, x in enumerate(col_1_values) if x == 'Business Description']
+    business_description = col_2_values[description_row.pop()]
+    
+    return company_name, business_description
+
+
+
+def build_business_description_appendix(financials_file_name, appendix_letter, *set_description):
+    word_doc.add_page_break()
+    if set_description:
+        set_description = str(set_description)
+        word_doc.add_heading("Appendix " + appendix_letter + " - Business Descriptions of Selected Comparable Companies: " + set_description +  "\n", level=2)
+    else:    
+        word_doc.add_heading("Appendix " + appendix_letter + " - Business Descriptions of Selected Comparable Companies \n", level=2)
+    
+    for sheet in comps_tabs_names:
+        company_name, business_description = read_business_description(financials_file_name, sheet)
+        number_and_name = word_doc.add_paragraph()
+        number_and_name.add_run(str(sheet_names_enum[sheet]) + ". \t" + str(company_name) + "\n").bold = True
+        business_paragraph = word_doc.add_paragraph(business_description)
+        p_format = business_paragraph.paragraph_format
+        p_format.keep_together = True
+        p_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
+        word_doc.add_paragraph()
+        
+
+
+###
+### Build comparables financials data appendix
+###
+
+def read_financial_data(financials_file_name, sheet):
+    wb_fin = xlrd.open_workbook(financials_file_name)
+    ws_fin = wb_fin.sheet_by_name(sheet)
+    col_1_values = ws_fin.col_values(0)
+    col_2_values = ws_fin.col_values(1)
+    information_dict = {}
+    gather_info_list = ['Company Name', 'Source', 'Country', 'Latest Consolidated Tax Year Available',
+                        'Latest Unconsolidated Tax Year Available', 'Financial Type', 'Currency',
+                        'Website', 'Ticker', 'Exchange', 'Number Of Employees', 'Primary US SIC', 
+                        'Primary NAICS 2012 (Derived*)']
+            
+    for item in gather_info_list:
+        item_row = [i for i, x in enumerate(col_1_values) if x == item]
+        item_detail = col_2_values[item_row.pop()]
+        information_dict[item] = item_detail
+        
+    income_statement_row = [i for i, x in enumerate(col_1_values) if x == 'Income Statement']
+    balance_sheet_row = [i for i, x in enumerate(col_1_values) if x == 'Balance Sheet']
+    business_description_row = [i for i, x in enumerate(col_1_values) if x == 'Business Description']
+    
+    def build_is_df(file_name, sheet_name):
+        xlsx = pd.ExcelFile(file_name)
+        rows_to_skip = []
+        rows_to_skip.extend([i for i in range(0, income_statement_row[0])])
+        rows_to_skip.extend([i for i in range(balance_sheet_row[0] - 1, len(col_1_values))])
+        df_is = pd.read_excel(xlsx, sheet_name, index_col=0, header=0, skiprows=rows_to_skip)
+        df_is['Average'] = df_is.mean(axis=1)
+        drop_rows_is = ['R and D Expense', 'Advertising Expense']
+        df_is = df_is.drop(drop_rows_is)
+        df_is.style.format("{:.2%}")
+        df_is = df_is.fillna("-")
+        return df_is
+    
+    def build_bs_df(file_name, sheet_name):
+        xlsx = pd.ExcelFile(file_name)
+        rows_to_skip = []
+        rows_to_skip.extend([i for i in range(0, balance_sheet_row[0])])
+        rows_to_skip.extend([i for i in range(business_description_row[0] - 1, len(col_1_values))])
+        df_bs = pd.read_excel(xlsx, sheet_name, index_col=0, header=0, skiprows=rows_to_skip)
+        df_bs['Average'] = df_bs.mean(axis=1)
+        drop_rows_bs = ['Avg LIFO Reserve', 'Avg Invested Capital']
+        df_bs = df_bs.drop(drop_rows_bs)
+        df_bs = df_bs.fillna("-")
+        return df_bs
+    
+    df_is = build_is_df(financials_file_name, sheet)
+    df_bs = build_bs_df(financials_file_name, sheet)
+    
+    return information_dict, df_is, df_bs
+
+
+def write_financial_data(information_dict, df_is, df_bs, sheet):
+    company_name, company_number = information_dict['Company Name'], sheet_names_enum[sheet]
+    p_name = word_doc.add_paragraph()
+    p_name.add_run(str(company_number) + "." + "\t" + str(company_name) + "\n").bold = True
+    is_paragraph = word_doc.add_paragraph()
+    is_paragraph.add_run("Income Statement \n").bold = True
+
+    if information_dict['Latest Consolidated Tax Year Available'] == '':
+        latest_tax_year_available = information_dict['Latest Unconsolidated Tax Year Available']
+    else:
+        latest_tax_year_available = information_dict['Latest Consolidated Tax Year Available']
+        
+    is_table = word_doc.add_table(rows=len(df_is) + 1, cols=len(df_is.columns) + 1, style = "Medium Shading 1 Accent 3")
+    
+    #Write column headings for range data in Word document
+    for column, cell in zip(df_is.columns.tolist(), range(1,len(df_is.columns.tolist())+1)):
+        p = is_table.rows[0].cells[cell].add_paragraph(text = str(column))
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    #Write row headings for range data in Word document
+    for row, item in zip(range(1, len(df_is)+1), range(0, len(df_is))):
+        p = is_table.columns[0].cells[row].add_paragraph(text = df_is.iloc[item]._name)
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+    #Write data for range data into Word document
+    for row in range(1, len(df_is)+1):
+        for column in range(1, len(df_is.columns)+1):
+            try:
+                cell_text = "{:,}".format(int(df_is.iloc[(row-1)][column-1]))
+            except ValueError:
+                cell_text = str(df_is.iloc[(row-1)][column-1])
+            p = is_table.rows[row].cells[column].add_paragraph(text=cell_text)
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            
+    for cell in is_table.columns[0].cells:
+        cell.width = Inches(1.75)
+
+    p_tax_year = word_doc.add_paragraph()
+    p_tax_year.add_run("\n Latest Tax Year Available: " + latest_tax_year_available + "\tCurrency: " + information_dict['Currency'][0:3]).bold = True
+    p_bs = word_doc.add_paragraph()
+    p_bs.add_run("\n Balance Sheet \n").bold = True
+            
+    bs_table = word_doc.add_table(rows=len(df_bs) + 1, cols=len(df_bs.columns) + 1, style = "Medium Shading 1 Accent 3")
+    
+    #Write column headings for range data in Word document
+    for column, cell in zip(df_bs.columns.tolist(), range(1,len(df_bs.columns.tolist())+1)):
+        p = bs_table.rows[0].cells[cell].add_paragraph(text = str(column))
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    #Write row headings for range data in Word document
+    for row, item in zip(range(1, len(df_bs)+1), range(0, len(df_bs))):
+        p = bs_table.columns[0].cells[row].add_paragraph(text = df_bs.iloc[item]._name)
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+    #Write data for range data into Word document
+    for row in range(1, len(df_bs)+1):
+        for column in range(1, len(df_bs.columns)+1):
+            try:
+                cell_text = "{:,}".format(int(df_bs.iloc[(row-1)][column-1]))
+            except ValueError:
+                cell_text = str(df_bs.iloc[(row-1)][column-1])           
+            p = bs_table.rows[row].cells[column].add_paragraph(text=cell_text)
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            
+    for cell in bs_table.columns[0].cells:
+        cell.width = Inches(1.75)
+            
+    p_tax_year2 = word_doc.add_paragraph()
+    p_tax_year2.add_run("\n Latest Tax Year Available: " + latest_tax_year_available + "\tCurrency: " + information_dict['Currency'][0:3]).bold = True
+    word_doc.add_page_break()
+    
+    
+def build_comparables_financials_appendix(financials_file_name, comps_tabs_names, appendix_letter, *set_description):
+    word_doc.add_page_break()
+    if set_description:
+        set_description = str(set_description)
+        word_doc.add_heading("Appendix " + appendix_letter + " - Financial Information of the Selected Comparable Companies: " + set_description + "\n", level=2)
+    else:
+        word_doc.add_heading("Appendix " + appendix_letter + " - Financial Information of the Selected Comparable Companies \n", level=2)
+    
+    word_doc.add_paragraph("The following comparable data search and evaluation process has been conducted for the tested party shown below: \n")
+   
+    for sheet in comps_tabs_names:
+        information_dict, df_is, df_bs = read_financial_data(financials_file_name, sheet)
+        write_financial_data(information_dict, df_is, df_bs, sheet)
+    
+
+###
+### Rejections Appendix
+###
+        
+def get_rejection_matrix(comp_rejection_matrix_file):
+    wb = xlrd.open_workbook(filename=comp_rejection_matrix_file)
+    sheet_names = wb._sheet_names
+    count_sheets = len(sheet_names)
+    
+    sheet_name = 'Matrix'
+    ws = wb.sheet_by_name(sheet_name)
+    col_1_values = ws.col_values(0)
+    company_names_list = []
+    
+    row_counter = 0
+    company_name_row_dict = {}
+    
+    for text in col_1_values:
+        if text in ['Comparable Accept/Reject Matrix', '','Company Name']:
+            row_counter += 1
+        else:
+            company_name_row_dict[row_counter] = text
+            row_counter += 1
+    
+    first_company_row, last_company_row = min(company_name_row_dict.keys()), max(company_name_row_dict.keys())
+    
+    def build_full_matrix(file_name, sheet_name):
+        xlsx = pd.ExcelFile(file_name)
+        rows_to_skip = []
+        rows_to_skip.extend([i for i in range(0, first_company_row - 2)])
+        rows_to_skip.extend([i for i in range(last_company_row + 1, row_counter)])
+        
+        df_full_matrix = pd.read_excel(xlsx, sheet_name, index_col=0, header=first_company_row - 2, na_values=['NA'], skiprows=rows_to_skip)
+    
+        return df_full_matrix
+    
+    df_full_matrix = build_full_matrix(comp_rejection_matrix_file, sheet_name)
+    max_df_iloc = last_company_row - first_company_row
+    
+    accepted_companies = []
+    for company, accepted in zip(df_full_matrix.index, df_full_matrix['Accepted'].tolist()):
+        if type(accepted) == str:
+            accepted_companies.append((company))
+        else:
+            pass
+        
+    first_review_rejected = []
+    for company, rejected_x, rejection_reason in zip(df_full_matrix.index, df_full_matrix['1st Review'].tolist(), df_full_matrix['Rejection Reason'].tolist()):
+        if type(rejected_x) == str:
+            first_review_rejected.append((company, rejection_reason))
+        else:
+            pass
+        
+    second_review_rejected = []
+    for company, rejected_x, rejection_reason in zip(df_full_matrix.index, df_full_matrix['2nd Review'].tolist(), df_full_matrix['Rejection Reason'].tolist()):
+        if type(rejected_x) == str:
+            second_review_rejected.append((company, rejection_reason))
+        else:
+            pass
+    
+    first_and_second_rejections = [x[0] for x in first_review_rejected]
+    first_and_second_rejections.extend([x[0] for x in second_review_rejected])
+    
+    
+    
+    bulk_rejections = []
+    for company, rejection_reason in zip(df_full_matrix.index, df_full_matrix['Rejection Reason'].tolist()):
+        if type(rejection_reason) == str and company not in first_and_second_rejections:
+            bulk_rejections.append((company, rejection_reason))
+        else:
+            pass
+        
+    return accepted_companies, first_review_rejected, second_review_rejected, bulk_rejections
+
+
+def build_bulk_rejection_table(table_number, appendix_letter, *set_description):
+    accepted_companies, first_review_rejected, second_review_rejected, bulk_rejections = get_rejection_matrix(comp_rejection_matrix_file)
+    word_doc.add_page_break()
+    if set_description:
+        set_description = str(set_description)
+        word_doc.add_heading("Appendix " + appendix_letter + " - Rejection Reasons: " + set_description + "\n", level=2)
+    else:
+        word_doc.add_heading("Appendix " + appendix_letter + " - Rejection Reasons \n", level=2)
+    bulk_rejection_table = word_doc.add_table(rows=len(bulk_rejections) + 1, cols = 3, 
+                                              style = "Medium Shading 1 Accent 3")
+    
+    column_headings_bulk = ['#', 'Potential Comparable Taxpayer', 'Bulk Rejection Reason']
+        
+    #Write column headings for range data in Word document
+    for column, cell in zip(column_headings_bulk, range(3)):
+        p = bulk_rejection_table.rows[0].cells[cell].add_paragraph(text = str(column))
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    #Write row headings for range data in Word document
+    for row in range(1, len(bulk_rejections)+1):
+        string_format = str(row)
+        bulk_rejection_table.columns[0].cells[row].text = string_format
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+       
+    company_list_bulk = [x[0] for x in bulk_rejections]
+    for row, company in zip(range(1, len(bulk_rejections)+1), company_list_bulk):
+        bulk_rejection_table.columns[1].cells[row].text = company
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT    
+    
+    reason_list = [x[1] for x in bulk_rejections]
+    for row, reason in zip(range(1, len(bulk_rejections)+1), reason_list):
+        if reason.startswith('Consolidated and Unconsolidated ') == True:
+            reason = reason.lstrip('Consolidated and Unconsolidated ')
+        else:
+            pass
+        bulk_rejection_table.columns[2].cells[row].text = reason
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT     
+        
+    for cell in bulk_rejection_table.columns[0].cells:
+        cell.width = Inches(.35)
+    
+    for cell in bulk_rejection_table.columns[2].cells:
+        cell.width = Inches(3) 
+    
+    
+    if len(first_review_rejected) > 0:
+        word_doc.add_paragraph("\n Companies rejected during first review: \n")
+            
+        first_review_rejection_table = word_doc.add_table(rows=len(first_review_rejected) + 1, cols = 3, 
+                                                  style = "Medium Shading 1 Accent 3")
+            
+        column_headings_first = ['#', 'Potential Comparable Taxpayer', 'First Review Rejection Reason']
+            
+        #Write column headings for range data in Word document
+        for column, cell in zip(column_headings_first, range(3)):
+            p = first_review_rejection_table.rows[0].cells[cell].add_paragraph(text = str(column))
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        #Write row headings for range data in Word document
+        for row in range(1, len(first_review_rejected)+1):
+            string_format = str(row)
+            first_review_rejection_table.columns[0].cells[row].text = string_format
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+           
+        company_list_first = [x[0] for x in first_review_rejected]
+        for row, company in zip(range(1, len(first_review_rejected)+1), company_list_first):
+            first_review_rejection_table.columns[1].cells[row].text = company
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT    
+        
+        reason_list_first = [x[1] for x in first_review_rejected]
+        for row, reason in zip(range(1, len(first_review_rejected)+1), reason_list_first):
+            reason = str(reason)
+            first_review_rejection_table.columns[2].cells[row].text = reason
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT     
+            
+        for cell in first_review_rejection_table.columns[0].cells:
+            cell.width = Inches(.35)
+        
+        for cell in first_review_rejection_table.columns[2].cells:
+            cell.width = Inches(3)
+    else:
+        word_doc.add_paragraph("\n\n No companies rejected during first review. \n")
+        
+        
+    if len(second_review_rejected) > 0:
+        word_doc.add_paragraph("\n Companies rejected during second review: \n")
+            
+        second_review_rejection_table = word_doc.add_table(rows=len(second_review_rejected) + 1, cols = 3, 
+                                                  style = "Medium Shading 1 Accent 3")
+            
+        column_headings_second = ['#', 'Potential Comparable Taxpayer', 'Second Review Rejection Reason']
+            
+        #Write column headings for range data in Word document
+        for column, cell in zip(column_headings_second, range(3)):
+            p = second_review_rejection_table.rows[0].cells[cell].add_paragraph(text = str(column))
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        #Write row headings for range data in Word document
+        for row in range(1, len(second_review_rejected)+1):
+            string_format = str(row)
+            second_review_rejection_table.columns[0].cells[row].text = string_format
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+           
+        company_list_second = [x[0] for x in second_review_rejected]
+        for row, company in zip(range(1, len(second_review_rejected)+1), company_list_second):
+            second_review_rejection_table.columns[1].cells[row].text = company
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT    
+        
+        reason_list_second = [x[1] for x in second_review_rejected]
+        for row, reason in zip(range(1, len(second_review_rejected)+1), reason_list_second):
+            second_review_rejection_table.columns[2].cells[row].text = reason
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT     
+            
+        for cell in second_review_rejection_table.columns[0].cells:
+            cell.width = Inches(.35)
+        
+        for cell in second_review_rejection_table.columns[2].cells:
+            cell.width = Inches(3)
+    else:
+        word_doc.add_paragraph("\n\n No companies rejected during second review. \n")
+        
+        
+    return accepted_companies, first_review_rejected, second_review_rejected, bulk_rejections
+        
+
+
+table_number = add_company_name_table(table_number)
+
+for sheet_name in sheet_names:
+    table_number = build_PLI_tables(sheet_names, table_number)
+
+build_search_strategy_appendix("A", "tested_party", "data_set_source", )
+
+build_business_description_appendix(financials_file_name, "B", )
+
+build_comparables_financials_appendix(financials_file_name, comps_tabs_names, "C", )
+
+accepted_companies, first_review_rejected, second_review_rejected, bulk_rejections = build_bulk_rejection_table(table_number, "D", )
+
+
+
+###
+### Save the word document
+###
+
+word_doc_file_name = tested_party + " " + today_string + ".docx"
+word_doc_save_path = os.path.join(os.path.dirname(range_construct_file_name), word_doc_file_name)
+word_doc.save(word_doc_save_path)
+
+
+#Timer of program run
+#end_time = datetime.datetime.now()
+#program_time = end_time - start_time
+#print("Saved {} tables in {}.{} seconds".format(str(table_number-1), program_time.seconds, program_time.microseconds))
+
+
+
+
+
+
