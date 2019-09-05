@@ -1,0 +1,103 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jul 23 15:05:07 2019
+
+@author: AG7180
+
+1. Use 'Export All to Data File' in Acrobat and save .xfdf file.
+2. Add path to .xfdf file in file_path variable below.
+
+"""
+
+import re
+import docx
+import os
+from bs4 import BeautifulSoup
+import datetime
+
+
+
+file_path = (r"ADD FILE PATH HERE")
+
+
+questionnaire_template_path = (r"_________________.docx")
+main_dir_location = os.path.dirname(file_path)
+f = open(questionnaire_template_path, 'rb')
+template_doc = docx.Document(f)
+
+
+report_date = datetime.date.today()
+report_date_text = report_date.strftime('%B') + ' ' + str(report_date.day) + ', ' + str(report_date.year)
+cur_date = datetime.datetime.now()
+date_save_file = str(cur_date.month) + "_" + str(cur_date.day) + "_" + str(cur_date.year)
+doc_save_location = main_dir_location + "\\" + "FV Questionnaire " + date_save_file + " at " + str(cur_date.hour) + "." + str(cur_date.minute) + ".docx"
+
+text_inputs = {'CURRENT_DATE': report_date_text,
+               'CLIENT_AND_VALUATION_FIRM': '',
+               'REPORT_TITLE': ''}
+               
+
+
+text_file = open(file_path, "r")
+read_text = text_file.read()
+
+soup = BeautifulSoup(read_text, "lxml")
+
+#re1 = re.compile("Contents\((.*)\)/CreationDate")
+
+#comments_list = [text for text in soup.stripped_strings]
+comments_list_p = soup.find_all('p')
+comments_list_t = [p.getText() for p in comments_list_p]
+
+comments_list_filtered = []
+
+for item in comments_list_t:
+    if not item == "Shadow" and not item == "shadow" and not item.startswith("_"):
+        comments_list_filtered.append(item)
+
+for item in range(len(comments_list_filtered)):
+    if "\r" in comments_list_filtered[item]:
+        comments_list_filtered[item] = comments_list_filtered[item].replace("\r", " ")
+        
+
+number_list = list(range(1,len(comments_list_filtered)+1))
+comments_list_numbered = []
+
+for x, y in zip(number_list, comments_list_filtered):
+    print(str(x)+".", y)
+    numbered_comment = str(x)+".", y
+    comments_list_numbered.append(numbered_comment)
+
+
+
+for comment in comments_list_filtered:
+    template_doc.add_paragraph(comment, style='List Paragraph')
+
+
+# WRITE TEXT INPUTS TO TEMPLATE WORD DOCUMENT FILE
+def apply_text_inputs(regex, replace):
+    for paragraph in template_doc.paragraphs:
+        if regex.search(paragraph.text):
+            inline = paragraph.runs
+            for i in range(len(inline)):
+                if regex.search(inline[i].text):
+                    text = regex.sub(replace, inline[i].text)
+                    inline[i].text = text
+
+def run_apply_texts():
+    for term, replace in text_inputs.items():
+        if len(replace) == 0:
+            pass
+        else:
+            regex = re.compile(term)
+            
+            apply_text_inputs(regex,replace)
+            
+run_apply_texts()
+
+
+
+
+
+template_doc.save(doc_save_location)
+
