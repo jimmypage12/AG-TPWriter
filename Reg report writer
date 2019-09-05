@@ -1,0 +1,1012 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jan  8 16:52:05 2019
+
+@author: AG7180
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Nov 22 16:19:14 2018
+
+@author: Andrew
+"""
+
+import docx
+import re
+import datetime
+from docx.shared import Pt
+from docx.oxml.xmlchemy import OxmlElement
+from docx.text.paragraph import Paragraph
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.style import WD_STYLE_TYPE
+import openpyxl
+import pandas as pd
+import pdfplumber
+import warnings
+import decimal
+import os
+import dateparser
+
+
+
+# FILE LOCATIONS
+main_dir_location = (r"DIR LOCATION")
+
+cur_date = datetime.datetime.now()
+date_save_file = str(cur_date.month) + "_" + str(cur_date.day) + "_" + str(cur_date.year)
+doc_save_location = main_dir_location + "\\4. Report\\Draft\\" + "Draft report " + date_save_file + " at " + str(cur_date.hour) + "." + str(cur_date.minute) + ".docx"
+template_doc_location = (r"L:\NJ\_ValuationAdmin\Automation files\Report Template.docx")
+val_methods_template_docs_location = (r"DIR LOCATION")
+document = docx.Document(template_doc_location)
+
+
+
+draft_exhibits_folder_location = main_dir_location + "\\3. Exhibits\\Draft"
+
+
+for file in os.listdir(draft_exhibits_folder_location):
+    if file[-5:] == '.xlsx':
+        xlsx_location = draft_exhibits_folder_location + "\\" + file
+
+#xlsx_location = (r"XLSX LOCATION")
+
+
+# NER folder is saved on the L drive 
+NER_folder_location = (r"L:\_____________\NER Reports")
+IBIS_folder_location = main_dir_location + "\\5. Research & Support\\Industry Outlook"
+IBIS_file_location = None
+for file in os.listdir(IBIS_folder_location):
+    if file[-4:] == '.pdf':
+        IBIS_file_location = IBIS_folder_location + "\\" + file
+engagement_letter_folder_location = main_dir_location + "\\1. Administrative\\1. Engagement Letters"
+engagement_letter_file_location = None
+for file in os.listdir(engagement_letter_folder_location):
+    if file[-4:] == '.pdf':
+        engagement_letter_file_location = engagement_letter_folder_location + "\\" + file
+
+
+#IBIS_file_location = (r"_____________.pdf")
+
+
+
+# SECTIONS TO RUN
+add_NER_yn = True
+add_TOC_yn = True
+add_IBIS_yn = True
+add_val_methods_yn = True
+add_address_yn = True
+add_DLOC_discussion_yn = True
+add_DLOM_discussion_yn = True
+
+
+
+warnings.simplefilter("ignore")
+xlsx_file = openpyxl.load_workbook(xlsx_location, data_only = True, read_only = True)
+if xlsx_file.read_only:
+    print('Opened xlsx file in read_only mode.')
+#warnings.simplefilter("ignore", category=DeprecationWarning)
+inputs_sheet = xlsx_file['Inputs!']
+#warnings.simplefilter("ignore", category=DeprecationWarning)
+TOC_sheet = xlsx_file['TOC']
+#warnings.simplefilter("ignore", category=DeprecationWarning)
+CapIQ_sheet = xlsx_file['CapIQ Sheet!']
+
+
+
+IBISpdf = pdfplumber.open(IBIS_file_location)
+engagement_letter_pdf = pdfplumber.open(engagement_letter_file_location)
+
+# GATHER BASIC INPUTS FROM EXCEL FILE
+val_date = inputs_sheet['b2'].value
+val_date_text = val_date.strftime('%B') + ' ' + str(val_date.day) + ', ' + str(val_date.year)
+report_date = datetime.date.today()
+report_date_text = report_date.strftime('%B') + ' ' + str(report_date.day) + ', ' + str(report_date.year)
+
+tax_rate = inputs_sheet['b4'].value.__format__('0.00%')
+standard_of_value = inputs_sheet['b3'].value
+value_basis = inputs_sheet['b5'].value
+value_purpose = inputs_sheet['b7'].value
+primary_appraiser = inputs_sheet['b8'].value
+secondary_appraiser = inputs_sheet['b9'].value
+DCF_conclusion = inputs_sheet['b12'].value
+CapEarn_conclusion = inputs_sheet['b13'].value
+GPC_conclusion = inputs_sheet['b14'].value
+GT_conclusion = inputs_sheet['b15'].value
+Backsolve_conclusion = inputs_sheet['b16'].value
+NAV_conclusion = inputs_sheet['b17'].value
+
+# SET WORD DOCUMENT STYLES AND DEFAULTS
+style = document.styles['Normal']
+font = style.font
+font.name = 'Segoe UI'
+font.size = Pt(11)
+
+
+# DICTIONARY OF TEXT INPUTS
+text_inputs = {'COMPANY_FULL_NAME': '', #'Doe Company Holdings, Inc.'
+          'COMPANY_SHORT_NAME': '', #'Doe Company'
+          'ALT_SHORT_NAME': 'Company',#'Company'
+          'VALUATION_DATE': '', #'June 30, 2018'
+          'REPORT_DATE': '', #'October 15, 2018'
+          'REPORT_PURPOSE': '', #'management planning purposes'
+          'CLIENT_NAME': '', #'John Doe'
+          'CLIENT_SECONDNAME': '', #'c/o James Smith, Esq.'
+          'CLIENT_FIRSTADDRESS': '', #'200 Main Street'
+          'CLIENT_SECONDADDRESS': '', #'New York, New York 10019'         
+          'CLIENT_SHORT_NAME': '', #'Mr. Doe'
+          'PRIMARY_APPRAISER': '', #'Joan M. D’Uva, CPA/ABV/CFF, ASA, CFE'
+          'PRIMARY_INITIALS': '', #'JMD'
+          'SECONDARY_APPRAISER': '', #'Shaun Maloney, CFA, CPA/ABV/CEIV/CFF/CGMA'
+          'SECONDARY_INTIALS': '', #'SM'
+          'ADMIN_INTIALS': '', #'cjh'
+          'NER_QUARTER': '', #'third'
+          'NER_YEAR': '', #'2018'
+          'OWNERSHIP_TYPE': '', #'ownership interest in Series A Preferred Stock'
+#          'VALUE_BASIS': '', #'minority, nonmarketable'
+          'OWNERSHIP_AMOUNT': '', #'1%'
+#          'FMV_OR_FV': '', #'fair market value'
+          'IBIS_REPORT_NAME': '', #'OD4749: e-Trading Software Developers in the US'
+          'IBIS_SHORT_INDUSTRY': '', #'e-trading software developers'
+          'IBIS_INDUSTRY_NAME': '', #'e-trading software developers industry'
+          'IBIS_PUBLISH_DATE': '', #'September 2017'
+          'IBIS_REPORT_NUMBER': '', #'62111b'
+          'MERGERSTAT_YEAR': '', #'2017'
+          'VALUATION_METHODOLOGIES_TEXT': '',
+          'STANDARD_OF_VALUE': '',
+          'STANDARD_CAPS_OF_VALUE': '',
+          'VALUE_BASIS': '',
+          'VALUE_CAPS_BASIS': '',
+
+          }
+
+# DICTIONARY OF NUMERIC INPUTS
+numeric_inputs = {'FORWARD_LETTER_CONCLUSION': '', #'$20,000 (rounded).'
+                  'FINAL_PAGE_CONCLUSION': '', #'$20,000 (rounded).'
+                  'DCF_METHOD_CONCLUSION': '', #'$20,000 (rounded).'
+                  'CAP_EARNINGS_CONCLUSION': '', #'$40,000 (rounded).'
+                  'GPC_METHOD_CONCLUSION': '', #'$30,000 (rounded).'
+                  'GT_METHOD_CONCLUSION': '', #'$35,000 (rounded).'
+                  'NET_ASSET_VALUE_CONCLUSION': '', #'$18,000 (rounded).'
+                  'BACKSOLVE_METHOD_CONCLUSION': '', #'$25,000 (rounded).'
+                  'TAX_RATE': '', #28%
+                  'WACC_CONCLUSION': '', #20%
+                  'CAP_RATE_CONCLUSION': '', #17%
+                  'COMPANY_SPECIFIC_RISK_PREMIUM': '', # 3.0%    
+                  'LONG_TERM_GROWTH_RATE': '', #3.0%
+                  'DLOM_CONCLUSION': '', #'25%'
+                  'DLOC_CONCLUSION': '', #'20%'
+                  
+                  }
+
+exhibit_reference_inputs = {'CAP_EARNINGS_EX_REF': '',
+                            'DCF_EX_REF':'',
+                            'GT_TRANSACTION_EX_REF': '',
+                            'GPC_METHOD_EX_REF': '',
+                            'NET_ASSET_VALUE_EX_REF': '',
+                            'BACKSOLVE_METHOD_EX_REF': '',
+                            'DLOC_EX_REF': '',
+                            'DLOM_EX_REF': '',
+                            'IS_EX_REF': '',
+                            'BS_EX_REF': '',
+                            'WACC_EX_REF': '',
+                            }
+
+
+# BUILD TABLE OF CONTENTS
+def build_TOC():
+    TOC_list = []
+    counter = 1
+    for row in TOC_sheet.iter_rows():
+        if len(row) == 0:
+            pass
+        elif row[1].value == None and counter > 3: 
+            break
+        elif row[1].value == None:
+            pass
+        elif not row[1].value.startswith('Exhibit'):
+            pass
+        elif row[2].value.startswith('New Sheet'):
+            pass
+        else:
+            TOC_key = row[1].value
+            TOC_code = (row[1].value + " TITLE").replace(" ", "_").upper
+            TOC_val = row[2].value
+            list_entry = (counter, TOC_key, TOC_val)
+            TOC_list.append(list_entry)
+            counter += 1          
+    return TOC_list
+
+if add_TOC_yn == True:
+    TOC_list = build_TOC()
+    print("TOC listing built from xlsx file.")
+
+
+# DETERMINE NER QUARTER
+def determine_NER_quarter():
+    quarters = {1: (3,31),
+                2: (6,30),
+                3: (9,30),
+                4: (12,31)}
+    
+    quarters_text_format = {1: ('first', '1st'),
+                            2: ('second', '2nd'),
+                            3: ('third', '3rd'),
+                            4: ('fourth', '4th')}
+    
+    quarter_ends = {}
+    for year in range(val_date.year -2, val_date.year + 1):
+        for quarter in range(1,5):
+            key = 'Q' + str(quarter) + ' ' + str(year)
+            quarter_ends[key] = datetime.datetime(year=year, month=quarters[quarter][0], day=quarters[quarter][1])
+    
+    NER_quarter = datetime.datetime(2000,1,1)
+    for item in quarter_ends.items():
+        if (val_date - item[1]).days >= 0 and (val_date - item[1]).days > (NER_quarter - item[1]).days:
+            NER_quarter = item[1]
+            NER_quarter_key = item[0]
+            
+    NER_text_file_location = NER_folder_location + '\\NER-' + quarters_text_format[int(NER_quarter_key[1])][1] +'Qtr' + NER_quarter_key[-4:] + '_Text-Only.docx'
+    NER_appendix_entry = quarters_text_format[int(NER_quarter_key[1])][0].title() + ' Quarter ' + NER_quarter_key[-4:]
+
+    
+    return NER_quarter_key, NER_text_file_location, NER_appendix_entry
+
+
+if add_NER_yn == True:
+    NER_quarter_key, NER_text_file_location, NER_appendix_entry = determine_NER_quarter()
+
+# OPEN AND READ NER DOCX FILE
+NER_doc_f = open(NER_text_file_location, 'rb')
+NER_doc = docx.Document(NER_doc_f)
+
+def read_NER_doc():
+    read_start_search_term = 'Special Notes:'
+    last_read_paragraph_number = None
+    for num, paragraph in enumerate(NER_doc.paragraphs):
+        if paragraph.text == read_start_search_term:
+            last_read_paragraph_number = num
+    
+    section_dictionary = {}        
+    section_names = ['Gross Domestic Product', 'Economic Indicators', 'Historical Business Cycles and Fiscal Policy Overview',
+                'Inflation', 'Oil and Gasoline', 'Retail Sales and Personal Consumption', 'Business and Manufacturing Productivity',
+                'Industrial Production and Capacity Utilization', 'The Financial Markets', 'Housing Market',
+                'Unemployment and Payroll Jobs', 'Monetary Policy and Interest rates', 'Summary and Outlook']
+    for num, paragraph in enumerate(NER_doc.paragraphs):
+        if num > last_read_paragraph_number:
+            pass
+        elif paragraph.text in section_names:
+            section_dictionary[paragraph.text] = num
+    
+    inverted_section_dictionary = {}
+    for key, value in section_dictionary.items():
+        inverted_section_dictionary[value] = key
+        
+    paragraph_range_len = []
+    paragraph_num_container = 0   
+    
+    for paragraph_num in list(section_dictionary.values()):
+        if paragraph_num_container == 0:
+            paragraph_num_container = paragraph_num
+        else:
+            paragraph_range = paragraph_num - paragraph_num_container
+            paragraph_range_len.append(paragraph_range)
+            paragraph_num_container = paragraph_num
+    
+    paragraph_range_len.append(last_read_paragraph_number - paragraph_num_container)
+    
+    paragraph_detailed_range = []
+    for item in zip(list(section_dictionary.values()), paragraph_range_len):
+        paragraph_detailed_range.append((item[0], (item[0]+1, item[0]+item[1])))
+        
+    
+    full_NER_dict = {}
+    
+    
+    for range_data in paragraph_detailed_range:
+        section_name = inverted_section_dictionary[range_data[0]]
+        paragraph_text = ''
+        for individual_range in range(range_data[1][0], range_data[1][1]):
+            paragraph_text = paragraph_text + NER_doc.paragraphs[individual_range].text
+        
+        
+        full_NER_dict[section_name] = {'Paragraph_begin': range_data[0],
+                                         ' Paragraph_text_range': range_data[1],
+                                         'Section_text': paragraph_text}
+    return full_NER_dict
+
+if add_NER_yn == True:
+    full_NER_dict = read_NER_doc()
+
+
+
+def insert_paragraph_after(paragraph, text=None, style=None):
+    new_p = OxmlElement("w:p")
+    paragraph._p.addnext(new_p)
+    new_para = Paragraph(new_p, paragraph._parent)
+    if text:
+        new_para.style = style
+    if style is not None:
+        new_para.style = style
+    
+    return new_para
+
+
+# WRITE NER TO WORD DOCUMENT
+def write_NER_to_docx():
+        section_selection = {'Gross Domestic Product' : True,
+                             'Economic Indicators' : True,
+                             'Historical Business Cycles and Fiscal Policy Overview' : False,
+                             'Inflation' : True,
+                             'Oil and Gasoline' : False, 
+                             'Retail Sales and Personal Consumption' : True,
+                             'Business and Manufacturing Productivity' : False,
+                             'Industrial Production and Capacity Utilization' : False, 
+                             'The Financial Markets' : True,
+                             'Housing Market' : True,
+                             'Unemployment and Payroll Jobs' : True, 
+                             'Monetary Policy and Interest rates' : True,
+                             'Summary and Outlook' : True}
+        
+        NER_paragraph_placeholder = None
+        for paragraph in document.paragraphs:
+            if paragraph.text == "NER_TEXT":
+                NER_paragraph_placeholder = paragraph
+        
+        for section in full_NER_dict.keys():
+            if section_selection[section] == True:
+                header_paragraph = NER_paragraph_placeholder.insert_paragraph_before(text=section)
+                header_paragraph.runs[0].underline = True
+                section_text = NER_paragraph_placeholder.insert_paragraph_before(text=full_NER_dict[section]['Section_text'] + "")
+                for x in section_text.runs:
+                    x.underline = False
+                NER_paragraph_placeholder.insert_paragraph_before()
+                
+        for paragraph in document.paragraphs:
+            if paragraph.text == "NER_TEXT":
+                paragraph.clear()
+
+if add_NER_yn == True:
+    write_NER_to_docx()
+    print("NER added to docx: " + NER_appendix_entry + ".")           
+
+
+def write_TOC_to_docx(TOC_list):
+    TOC_text_placeholder = None
+    for paragraph in document.paragraphs:
+        if paragraph.text.startswith("EXHIBIT_NUMBER"):
+            TOC_text_placeholder = paragraph
+    
+    for item in TOC_list:
+        TOC_line_text = item[1] + '\t' + item[2]
+        TOC_paragraph = TOC_text_placeholder.insert_paragraph_before(text=TOC_line_text)
+        
+    for paragraph in document.paragraphs:
+        if paragraph.text.startswith("EXHIBIT_NUMBER"):
+            paragraph.clear()
+        
+if add_TOC_yn == True:
+    write_TOC_to_docx(TOC_list)
+    print("TOC added to docx: " + str(len(TOC_list)) + " exhibits counted.")
+    
+    
+def read_IBIS_pdf():
+    p1_text = IBISpdf.pages[0].extract_text()
+    IBIS_title_regex = re.compile(r"(WWW.IBISWORLD.COM  )([A-Za-z0-9 &]+ in the US)(  )([A-Za-z ]+20[0-9]+)")
+    if IBIS_title_regex.search(p1_text):
+        IBIS_industry = IBIS_title_regex.search(p1_text)[2]
+        IBIS_publish_date = IBIS_title_regex.search(p1_text)[4]
+        
+    IBIS_report_number_regex = re.compile(r"(IBISWorld Industry Report )([A-Za-z0-9]{4,8})(\n)")
+    if IBIS_report_number_regex.search(p1_text):
+        IBIS_report_number = IBIS_report_number_regex.search(p1_text)[2]
+        
+    
+    executive_summary_page = None
+    IBIS_text_dict = {}
+    for page in range(3,6):
+        IBIS_text_dict[page] = IBISpdf.pages[page].extract_text()
+    
+    for page_num, text in IBIS_text_dict.items():
+        if "|" in text:
+            executive_summary_page = page_num
+    
+    p5 = IBISpdf.pages[executive_summary_page]
+    p5_words = p5.extract_words()
+    
+    key_marker_list = []
+    for word in p5_words:
+        if word['text'] == 'Key' and word['top'] > 200 and word['x1'] < 100:
+            key_marker_list.append(word)
+    
+    if len(key_marker_list) == 1:
+        column_bbox_bottom = float(key_marker_list[0]['top'])
+        
+#   bounding box format: (x0, top, x1, bottom)        
+    column_1_bbox = (182, 142, 375, column_bbox_bottom)
+    column_1_text = p5.within_bbox(column_1_bbox).extract_text()
+    
+    column_2_bbox = (376, 142, 600, column_bbox_bottom)
+    column_2_text = p5.within_bbox(column_2_bbox).extract_text()
+    
+    red_media_rect = p5.rects[1]
+    red_media_bbox = (column_1_bbox[0], red_media_rect['top'], red_media_rect['x1'], red_media_rect['bottom'])
+    red_media_text = p5.within_bbox(red_media_bbox).extract_text()
+    
+    if red_media_text in column_1_text:
+        column_1_text = column_1_text.replace(red_media_text, "")
+        column_1_text = column_1_text.replace("\n\n", "\n")
+    else: 
+        print("Text in red media box not removed")
+        
+    full_exective_summary_text = column_1_text + "\n" + column_2_text
+    full_exective_summary_text = full_exective_summary_text.replace("\n", "")
+    
+
+    return IBIS_industry, IBIS_publish_date, IBIS_report_number, full_exective_summary_text
+    
+IBIS_industry, IBIS_publish_date, IBIS_report_number, full_executive_summary_text = read_IBIS_pdf()  
+    
+def write_IBIS_to_docx():
+        IBIS_paragraph_placeholder = None
+        for paragraph in document.paragraphs:
+            if paragraph.text == "IBIS_TEXT":
+                IBIS_paragraph_placeholder = paragraph
+
+        executive_summary_paragraph = IBIS_paragraph_placeholder.insert_paragraph_before(text=full_executive_summary_text)
+                
+        for paragraph in document.paragraphs:
+            if paragraph.text == "IBIS_TEXT":
+                paragraph.clear()
+
+if add_IBIS_yn == True:
+    write_IBIS_to_docx()   
+    print("IBIS added to docx: " + IBIS_industry + " " + IBIS_publish_date + ".")             
+
+
+#Build list of Guideline Public Companies
+def read_GPCs():
+    GPC_dict = {}
+    exhibits_contain_GPCs = False
+    for exhibit_name in TOC_list:
+        if exhibit_name[2].startswith("Guideline Public Comp"):
+            exhibits_contain_GPCs = True
+            break
+        else:
+            pass
+#    print(exhibits_contain_GPCs)
+    
+    if exhibits_contain_GPCs == False:
+        return None
+    else:
+        for count, row in enumerate(CapIQ_sheet.iter_rows(min_row=10, max_row=39)):
+            if row[1].value == None or len(row[1].value) < 2:
+                pass
+            else:
+                GPC_dict[count] = {'ticker': row[2].value,
+                                            'name': row[1].value,
+                                            'numerical_count': count + 1}
+    return GPC_dict
+            
+        
+    
+GPC_dict = read_GPCs()
+    
+
+def build_exhibit_reference_inputs():
+    ex_titles_dict = {'BS_EX_REF': None,
+                      'IS_EX_REF': None,
+                      'PROJECTIONS_EX_REF': None,
+                      'WACC_EX_REF': None,
+                      'CAP_EARNINGS_EX_REF': None,
+                      'DCF_EX_REF': None,
+                      'GPC_METHOD_EX_REF': None,
+                      'GT_METHOD_EX_REF': None,
+                      'NAV_EX_REF': None,
+                      'DLOC_EX_REF': None,
+                      'BACKSOLVE_METHOD_EX_REF': None,
+                      'BETA_ANALYSIS_EX_REF': None,
+                      'CONCLUSION_EX_REF': None,                      
+                      
+                      }
+    
+    for count, ex_ref, ex_title in TOC_list:
+        if ex_titles_dict['BS_EX_REF'] == None:
+            if "Balance Sheet" in ex_title and not "Guideline" in ex_title:
+                ex_titles_dict['BS_EX_REF'] = ex_ref
+        
+        if ex_titles_dict['IS_EX_REF'] == None:
+            if "Income Statement" in ex_title:
+                ex_titles_dict['IS_EX_REF'] = ex_ref
+        
+        if ex_titles_dict['PROJECTIONS_EX_REF'] == None:
+            if "Project" in ex_title or "Prospective" in ex_title:
+                ex_titles_dict['PROJECTIONS_EX_REF'] = ex_ref
+
+        if ex_titles_dict['WACC_EX_REF'] == None:
+            if "Weighted Average Cost of Capital" in ex_title:
+                ex_titles_dict['WACC_EX_REF'] = ex_ref
+
+        if ex_titles_dict['CAP_EARNINGS_EX_REF'] == None:
+            if "Capitalization of Earnings" in ex_title:
+                ex_titles_dict['CAP_EARNINGS_EX_REF'] = ex_ref
+        
+        if ex_titles_dict['DCF_EX_REF'] == None:
+            if "Discounted Cash Flow" in ex_title and not "Beta" in ex_title and not "Weighted" in ex_title:
+                ex_titles_dict['DCF_EX_REF'] = ex_ref
+
+        if ex_titles_dict['DLOC_EX_REF'] == None:
+            if "Discount for Lack of Contol" in ex_title or "Development of Control Premium" in ex_title:
+                ex_titles_dict['DLOC_EX_REF'] = ex_ref   
+                
+        if ex_titles_dict['GPC_METHOD_EX_REF'] == None:
+            if ex_title == "Guideline Public Companies Method":
+                ex_titles_dict['GPC_METHOD_EX_REF'] = ex_ref
+
+        if ex_titles_dict['GT_METHOD_EX_REF'] == None:
+            if ex_title == "Guideline Transactions Method" or ex_title == "Guideline Transaction Method":
+                ex_titles_dict['GT_METHOD_EX_REF'] = ex_ref  
+                
+                
+                
+                
+                
+
+    for key, ex_ref in ex_titles_dict.items():
+        if ex_ref == None:
+            pass
+        else:
+            text_inputs[key] = ex_ref
+            
+build_exhibit_reference_inputs()
+            
+
+val_methodologies_section_number = 5
+
+# Valuation Methodologies Read/Write
+def val_methods_utilized():
+    all_val_methods_list = {'Discounted Cash Flow Method': 'DCF_EX_REF', 
+                            'Capitalization of Earnings Method': 'CAP_EARNINGS_EX_REF', 
+                            'Net Asset Value Method': 'NAV_EX_REF', 
+                            'Guideline Public Companies Method': 'GPC_METHOD_EX_REF', 
+                            'Guideline Transactions Method': 'GT_METHOD_EX_REF', 
+                            'Backsolve Method': 'BACKSOLVE_METHOD_EX_REF'}
+    val_methods_utilized_list = []
+    
+    print("Valuation Methods Utilized:")
+    for key, value in all_val_methods_list.items():
+        if value in text_inputs:
+            if text_inputs[value]:
+                val_method_dict_input = {'Method Name': key,
+                                         'Exhibit Reference Full': text_inputs[value],
+                                         'Exhibit Reference Number': int(text_inputs[value].split()[1]),
+                                         'Order': None,
+                                         'Report Section Heading': None}
+                val_methods_utilized_list.append(val_method_dict_input)
+
+                print("    " + key + " (" + text_inputs[value] + ")")
+            else:
+                pass
+        else:
+            pass
+    
+    val_methods_utilized_list_sort = sorted(val_methods_utilized_list, key = lambda i: i['Exhibit Reference Number'], reverse=False)
+    
+    for x in enumerate(val_methods_utilized_list_sort,1):
+        x[1]['Order'] = x[0]
+        x[1]['Report Section Heading'] = str(val_methodologies_section_number) + '.' + str(x[0])
+        
+    return val_methods_utilized_list_sort
+    
+        
+val_methods_utilized_list_sort = val_methods_utilized()
+    
+
+val_method_template_dict = {'Discounted Cash Flow Method': val_methods_template_docs_location + "\\methodology_DCF.docx",
+                            'Capitalization of Earnings Method': val_methods_template_docs_location + "\\methodology_CapEarn.docx",
+                            'Net Asset Value Method': val_methods_template_docs_location + "\\methodology_NAV.docx",
+                            'Guideline Public Companies Method': val_methods_template_docs_location + "\\methodology_GPC.docx",
+                            'Guideline Transactions Method': val_methods_template_docs_location + "\\methodology_GT.docx",
+                            'Backsolve Method': val_methods_template_docs_location + "\\methodology_Backsolve.docx"}
+
+
+
+
+valuation_methods_text = []
+valuation_methods_conclusion_terms = ['DCF_METHOD_CONCLUSION', 'CAP_EARNINGS_CONCLUSION', 'GPC_METHOD_CONCLUSION', 'GT_METHOD_CONCLUSION', 'NET_ASSET_VALUE_CONCLUSION', 'BACKSOLVE_METHOD_CONCLUSION']
+
+#val_methods_section_ref_dict = {}
+#for item in val_methods_utilized_list_sort:
+#    val_methods_section_ref_dict[item['Method Name']] = item['Report Section Heading']
+
+
+def read_valuation_method_discussion(val_method, report_section):
+    method_template_doc = docx.Document(val_method_template_dict[val_method])
+    valuation_methods_text.append({'Text': str(report_section) + ' ' + str(val_method), 
+                                   'Header': True,
+                                   'Concluded Value': False,
+                                   'Report Section Heading': True})
+    for paragraph in method_template_doc.paragraphs:
+        for term in valuation_methods_conclusion_terms:
+            if paragraph.text.startswith(term):
+                valuation_methods_text.append({'Text': paragraph.text, 
+                                           'Header': False,
+                                           'Concluded Value': True,
+                                           'Report Section Heading': False})
+                break
+
+        else:
+            valuation_methods_text.append({'Text': paragraph.text, 
+                           'Header': False,
+                           'Concluded Value': False,
+                           'Report Section Heading': False})
+                
+
+for method in val_methods_utilized_list_sort:
+    read_valuation_method_discussion(method['Method Name'], method['Report Section Heading'])
+
+
+def write_valuation_method_discussion():        
+    val_methods_paragraph_placeholder = None
+    for paragraph in document.paragraphs:
+        if paragraph.text == "VALUATION_METHODOLOGIES_TEXT":
+            val_methods_paragraph_placeholder = paragraph
+    
+#    for section in full_NER_dict.keys():
+#        if section_selection[section] == True:
+#            header_paragraph = NER_paragraph_placeholder.insert_paragraph_before(text=section)
+#            header_paragraph.runs[0].underline = True
+    
+    for section in valuation_methods_text:
+        if section['Header'] == True:
+            header_paragraph = val_methods_paragraph_placeholder.insert_paragraph_before(text=section['Text'])
+            header_paragraph.style = document.styles['Heading 2']
+#            header_paragraph.runs[0].underline = True
+        elif section['Concluded Value'] == False:
+            section_text = val_methods_paragraph_placeholder.insert_paragraph_before(text=section['Text'] + "")
+            for x in section_text.runs:
+                x.underline = False
+        elif section['Concluded Value'] == True:
+            section_text = val_methods_paragraph_placeholder.insert_paragraph_before(text=section['Text'] + "")
+            section_text.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for x in section_text.runs:
+                x.underline = False
+                x.bold = True
+                
+                
+                
+                
+#        val_methods_paragraph_placeholder.insert_paragraph_before()
+            
+    for paragraph in document.paragraphs:
+        if paragraph.text == "VALUATION_METHODOLOGIES_TEXT":
+            paragraph.clear()
+    
+        
+        
+if add_val_methods_yn == True:
+    write_valuation_method_discussion()
+    print("Valuation Methods added to docx.")
+
+
+def val_methods_rationale():
+    val_approaches_dict =  {'Income Approach': ['Discounted Cash Flow Method', 
+                                                'Capitalization of Earnings Method'],
+                            'Market Approach': ['Guideline Public Companies Method', 
+                                                'Guideline Transactions Method', 
+                                                'Backsolve Method'],
+                            'Asset Approach':  ['Net Asset Value Method']}
+    
+    val_approaches_utilized = {'Income Approach': False,
+                               'Market Approach': False,
+                               'Asset Approach':  False}
+    
+    val_methods_utilized_simple = [x['Method Name'] for x in val_methods_utilized_list_sort]
+    
+    
+    for item in val_methods_utilized_list_sort:
+        for approach in val_approaches_dict.items():
+            if item['Method Name'] in approach[1]:
+                val_approaches_utilized[approach[0]] = True
+                
+    RATIONALE_INCOME_APPROACH = ''
+    if 'Discounted Cash Flow Method' in val_methods_utilized_simple:
+        dcf_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_IncomeDCFUsed.docx"), 'rb')
+        dcf_used_doc = docx.Document(dcf_used_doc_f)
+        RATIONALE_INCOME_APPROACH = RATIONALE_INCOME_APPROACH + dcf_used_doc.paragraphs[0].text
+        text_inputs['DCF_METHOD_CONCLUSION'] = str(DCF_conclusion)
+    elif 'Discounted Cash Flow Method' not in val_methods_utilized_simple:
+        dcf_not_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_IncomeDCFNotUsed.docx"), 'rb')
+        dcf_not_used_doc = docx.Document(dcf_not_used_doc_f)
+        RATIONALE_INCOME_APPROACH = RATIONALE_INCOME_APPROACH + dcf_not_used_doc.paragraphs[0].text
+        
+    if 'Capitalization of Earnings Method' in val_methods_utilized_simple:
+        capearn_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_IncomeCapEarnUsed.docx"), 'rb')
+        capearn_used_doc = docx.Document(capearn_used_doc_f)
+        RATIONALE_INCOME_APPROACH = RATIONALE_INCOME_APPROACH + ' ' + capearn_used_doc.paragraphs[0].text
+        text_inputs['CAP_EARNINGS_METHOD_CONCLUSION'] = str(CapEarn_conclusion)
+    elif 'Capitalization of Earnings Method' not in val_methods_utilized_simple:
+        capearn_not_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_IncomeCapEarnNotUsed.docx"), 'rb')
+        capearn_not_used_doc = docx.Document(capearn_not_used_doc_f)
+        RATIONALE_INCOME_APPROACH = RATIONALE_INCOME_APPROACH + ' ' + capearn_not_used_doc.paragraphs[0].text       
+        
+    RATIONALE_MARKET_APPROACH = ''
+    if 'Guideline Public Companies Method' in val_methods_utilized_simple:
+        gpc_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_MarketGPCUsed.docx"), 'rb')
+        gpc_used_doc = docx.Document(gpc_used_doc_f)
+        RATIONALE_MARKET_APPROACH = RATIONALE_MARKET_APPROACH + gpc_used_doc.paragraphs[0].text
+        text_inputs['GPC_METHOD_CONCLUSION'] = str(GPC_conclusion)
+    elif 'Guideline Public Companies Method' not in val_methods_utilized_simple:
+        gpc_not_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_MarketGPCNotUsed.docx"), 'rb')
+        gpc_not_used_doc = docx.Document(gpc_not_used_doc_f)
+        RATIONALE_MARKET_APPROACH = RATIONALE_MARKET_APPROACH + gpc_not_used_doc.paragraphs[0].text
+        
+    if 'Guideline Transactions Method' in val_methods_utilized_simple:
+        gt_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_MarketGTUsed.docx"), 'rb')
+        gt_used_doc = docx.Document(gt_used_doc_f)
+        RATIONALE_MARKET_APPROACH = RATIONALE_MARKET_APPROACH + ' ' + gt_used_doc.paragraphs[0].text
+        text_inputs['GT_METHOD_CONCLUSION'] = str(GT_conclusion)
+    elif 'Guideline Transactions Method' not in val_methods_utilized_simple:
+        gt_not_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_MarketGTNotUsed.docx"), 'rb')
+        gt_not_used_doc = docx.Document(gt_not_used_doc_f)
+        RATIONALE_MARKET_APPROACH = RATIONALE_MARKET_APPROACH + ' ' + gt_not_used_doc.paragraphs[0].text 
+    if 'Backsolve Method' in val_methods_utilized_simple:
+        backsolve_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_MarketBacksolveUsed.docx"), 'rb')
+        backsolve_used_doc = docx.Document(backsolve_used_doc_f)
+        RATIONALE_MARKET_APPROACH = RATIONALE_MARKET_APPROACH + ' ' + backsolve_used_doc.paragraphs[0].text
+        text_inputs['BACKSOLVE_METHOD_CONCLUSION'] = str(Backsolve_conclusion)
+    elif 'Backsolve Method' not in val_methods_utilized_simple:
+        backsolve_not_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_MarketBacksolveNotUsed.docx"), 'rb')
+        backsolve_not_used_doc = docx.Document(backsolve_not_used_doc_f)
+        RATIONALE_MARKET_APPROACH = RATIONALE_MARKET_APPROACH + ' ' + backsolve_not_used_doc.paragraphs[0].text
+    
+    RATIONALE_ASSET_APPROACH = ''
+    if 'Net Asset Value Method' in val_methods_utilized_simple:
+        nav_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_AssetNAVUsed.docx"), 'rb')
+        nav_used_doc = docx.Document(nav_used_doc_f)
+        RATIONALE_ASSET_APPROACH = RATIONALE_ASSET_APPROACH + nav_used_doc.paragraphs[0].text
+        text_inputs['NET_ASSET_VALUE_METHOD_CONCLUSION'] = str(NAV_conclusion)
+    elif 'Net Asset Value Method' not in val_methods_utilized_simple:
+        nav_not_used_doc_f = open(os.path.join(val_methods_template_docs_location, "approach_AssetNAVNotUsed.docx"), 'rb')
+        nav_not_used_doc = docx.Document(nav_not_used_doc_f)
+        RATIONALE_ASSET_APPROACH = RATIONALE_ASSET_APPROACH + nav_not_used_doc.paragraphs[0].text 
+
+
+    return RATIONALE_INCOME_APPROACH, RATIONALE_MARKET_APPROACH, RATIONALE_ASSET_APPROACH
+                
+                
+text_inputs['RATIONALE_INCOME_APPROACH'], text_inputs['RATIONALE_MARKET_APPROACH'], text_inputs['RATIONALE_ASSET_APPROACH'] = val_methods_rationale()
+        
+
+def add_standard_of_value_paragraphs():
+    
+    standard_of_value_path_dict =   {"409A/ASC718" : os.path.join(val_methods_template_docs_location, "standardofvalue_409A_ASC718.docx"),
+                                    "ASC820" : os.path.join(val_methods_template_docs_location, "standardofvalue_ASC820.docx"),
+                                    "Estate & Gift" : os.path.join(val_methods_template_docs_location, "standardofvalue_Estate_Gift.docx"),
+                                    "Litigation - Other" : os.path.join(val_methods_template_docs_location, "standardofvalue_Litigation_Other.docx"),
+                                    "Management planning" : os.path.join(val_methods_template_docs_location, "standardofvalue_Management_Planning.docx"),
+                                    "Matrimonial" : os.path.join(val_methods_template_docs_location, "standardofvalue_Matrimonial.docx"),
+                                    }
+    
+    standard_of_value_doc_f = open(standard_of_value_path_dict[value_purpose], 'rb')
+    standard_of_value_doc = docx.Document(standard_of_value_doc_f)
+    
+    paragraph_1_text = ''
+    paragraph_2_text = ''
+    for paragraph in standard_of_value_doc.paragraphs:
+        if paragraph.text == '':
+            pass            
+        elif not paragraph.text == '' and paragraph_1_text == '':
+            paragraph_1_text = paragraph.text
+        elif not paragraph.text == '' and not paragraph_1_text == '':
+            paragraph_2_text = paragraph.text
+    
+    return paragraph_1_text, paragraph_2_text
+
+
+text_inputs['COVER_LETTER_STANDARD_VALUE'], text_inputs['INTRODUCTION_STANDARD_VALUE'] = add_standard_of_value_paragraphs()
+            
+
+def add_valuation_date_definition():
+    if value_purpose == "ASC820":
+        text_inputs['VALUATION_DEF_DATE'] = '“measument date” or “valuation date”'
+    else:
+        text_inputs['VALUATION_DEF_DATE'] = '“valuation date”'
+
+add_valuation_date_definition()
+        
+
+
+#read_valuation_method_discussion("Discounted Cash Flow Method")
+
+
+#text_inputs['VALUATION_METHODOLOGIES_TEXT'] = valuation_methods_text
+        
+val_purposes_list = ['management planning purposes', 
+                     'estate planning purposes',
+                     'gifting purposes',
+                     'possible sale',
+                     ]   
+
+eng_letter_dict = {}
+line_list = []
+address_line_list = []
+
+
+def read_engagement_letter():
+    p1_text = engagement_letter_pdf.pages[0].extract_text()
+    re_dear = re.compile("Dear")
+    for num, line in enumerate(p1_text.split("\n")):
+        line_list.append((num, line))
+       
+        
+    for line_num, line_text in line_list:
+        if len(line_text) > 25:
+            pass
+        if dateparser.parse(line_text, settings={'STRICT_PARSING':True}):
+            eng_letter_dict["letter date"] = {"line number": line_num,
+                                               "line text": line_text}
+            print("Line #: ", line_num, "Line text: ", line_text)
+            break
+        
+    for line_num, line_text in line_list:
+        if re.search(re_dear, line_text):
+            eng_letter_dict["Dear line"] = {"line number": line_num,
+                                               "line text": line_text.rstrip()}
+            print("Line #: ", line_num, "Line text: ", line_text)
+            break
+    
+    address_line_counter = 1
+    for line_num, line_text in line_list:
+        if line_num > eng_letter_dict['letter date']['line number'] and line_num < eng_letter_dict['Dear line']['line number']:
+            if line_text.isspace():
+                pass
+            elif "Re: " in line_text:
+                pass
+            else:
+                entry = "Address line " + str(address_line_counter)
+                eng_letter_dict[entry] = {"line number": line_num,
+                                           "line text": line_text.rstrip()}
+                address_line_list.append(line_text)
+                address_line_counter += 1
+                print(line_text)
+                
+    text_inputs['CLIENT_SHORT_NAME'] = eng_letter_dict['Dear line']['line text'].replace("Dear ", "").strip(":")
+        
+        
+read_engagement_letter()
+
+def write_address_to_docx():
+        address_paragraph_placeholder = None
+        for paragraph in document.paragraphs:
+            if paragraph.text == "ADDRESS_LINES":
+                address_paragraph_placeholder = paragraph
+
+        for item in address_line_list:
+            address_line_paragraph = address_paragraph_placeholder.insert_paragraph_before(text=item)
+                
+        for paragraph in document.paragraphs:
+            if paragraph.text == "ADDRESS_LINES":
+                paragraph.clear()
+
+if add_address_yn == True:
+    write_address_to_docx()   
+    print("Address added to docx.")          
+
+
+        
+        
+
+    
+        
+        
+    
+    
+        
+    
+
+
+
+
+            
+
+# BUILD DICTIONARY OF TEXT INPUTS
+def build_text_inputs():
+    text_inputs['COMPANY_FULL_NAME'] = inputs_sheet['B1'].value
+    text_inputs['COMPANY_CAPS_FULL_NAME'] = text_inputs['COMPANY_FULL_NAME'].upper()
+    text_inputs['VALUATION_DATE'] = val_date_text
+    text_inputs['VALUATION_CAPS_DATE'] = text_inputs['VALUATION_DATE'].upper()
+    text_inputs['REPORT_DATE'] = report_date_text
+    text_inputs['NER_QUARTER'] = NER_quarter_key
+    text_inputs['IBIS_REPORT_NAME'] = IBIS_industry
+    text_inputs['IBIS_SHORT_INDUSTRY'] = IBIS_industry.replace(" in the US", "")
+    text_inputs['IBIS_PUBLISH_DATE'] = IBIS_publish_date
+    text_inputs['IBIS_REPORT_NUMBER'] = IBIS_report_number
+    text_inputs['NER_APPENDIX_ENTRY'] =  NER_appendix_entry
+    text_inputs['TAX_RATE'] = tax_rate
+    text_inputs['STANDARD_OF_VALUE'] = standard_of_value
+    text_inputs['STANDARD_CAPS_OF_VALUE'] = text_inputs['STANDARD_OF_VALUE'].upper()
+    text_inputs['STANDARD_PROPER_OF_VALUE'] = text_inputs['STANDARD_OF_VALUE'].capitalize()
+    text_inputs['VALUE_BASIS'] = value_basis
+    text_inputs['VALUE_CAPS_BASIS'] = text_inputs['VALUE_BASIS'].upper()
+    text_inputs['PRIMARY_APPRAISER'] = primary_appraiser
+    text_inputs['SECONDARY_APPRAISER'] = secondary_appraiser
+
+
+
+#    
+    
+    #GUIDELINE PUBLIC COMPANIES
+#    for GPC_number in range(1,31):
+#        key = "GPC_" + str(x) + "_NAME"
+##        cell = 
+#        
+#    text_inputs['GPC_1_NAME'] = CapIQ_sheet['b10'].value
+    
+    
+
+build_text_inputs()
+
+print("Company name: " + text_inputs['COMPANY_FULL_NAME'])
+print("Valuation date: " + text_inputs['VALUATION_DATE'])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# WRITE TEXT INPUTS TO TEMPLATE WORD DOCUMENT FILE
+def apply_text_inputs(regex, replace):
+    for paragraph in document.paragraphs:
+        if regex.search(paragraph.text):
+            inline = paragraph.runs
+            for i in range(len(inline)):
+                if regex.search(inline[i].text):
+                    text = regex.sub(replace, inline[i].text)
+                    inline[i].text = text
+
+def run_apply_texts():
+    for term, replace in text_inputs.items():
+        if len(replace) == 0:
+            pass
+        else:
+            regex = re.compile(term)
+            
+            apply_text_inputs(regex,replace)
+            
+run_apply_texts()
+        
+        
+    
+    
+    
+
+def build_table_of_contents():
+    toc_worksheet = xlsx_file['TOC']
+    first_exhibit_cell_ref = ''
+    
+    
+
+
+
+
+
+
+document.save(doc_save_location)
